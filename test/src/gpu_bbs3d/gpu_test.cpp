@@ -7,93 +7,74 @@
 #include <pcl/common/transforms.h>
 #include <pcl/io/pcd_io.h>
 
-BBS3DTest::BBS3DTest() {}
+std::vector<Eigen::Vector3f> createTransSearchRange(const Eigen::Vector3f& center_pose,
+                                                                         float width)
+{
+  std::vector<Eigen::Vector3f> trans_search_range(2);
+  trans_search_range[0] << center_pose.x() + width, center_pose.y() + width, center_pose.z() + width;
+  trans_search_range[1] << center_pose.x() - width, center_pose.y() - width, center_pose.z() - width;
+  return trans_search_range;
+};
 
-BBS3DTest::~BBS3DTest() {}
-
-int BBS3DTest::run(std::string config) {
-  // Load config file
-  if (!load_config(config)) {
-    std::cout << "[ERROR]  Loading config file failed" << std::endl;
-    return 1;
-  };
-
-  if (use_gicp) gicp_ptr.reset(new GICP);
-
-  // Load target pcds
-  std::cout << "[Setting] Loading target pcds..." << std::endl;
-  std::vector<Eigen::Vector3f> tar_points;
-  if (!load_tar_clouds(tar_points)) {
-    std::cout << "[ERROR] Loading target pcd failed" << std::endl;
-    return 1;
-  }
-
-  // Load source pcds
-  std::cout << "[Setting] Loading source pcds..." << std::endl;
-  std::map<std::string, std::vector<Eigen::Vector3f>> src_points_set;
-  if (!load_src_clouds(src_points_set)) {
-    std::cout << "[ERROR] Loading source pcds failed" << std::endl;
-    return 1;
-  };
-
-  // Create output folder with date
-  std::cout << "[Setting] Create output folder with date..." << std::endl;
-  std::string date = createDate();
-  std::string pcd_save_folder_path = output_path + "/" + date;
-  boost::filesystem::create_directory(pcd_save_folder_path);
-
-  // ====3D-BBS====
-  // Set target points
-  auto initi_t1 = std::chrono::high_resolution_clock::now();
-  std::cout << "[Voxel map] Creating hierarchical voxel map..." << std::endl;
-  std::unique_ptr<gpu::BBS3D> bbs3d_ptr(new gpu::BBS3D);
-  bbs3d_ptr->set_tar_points(tar_points, min_level_res, max_level);
-  bbs3d_ptr->set_angular_search_range(min_rpy.cast<float>(), max_rpy.cast<float>());
-
-  auto init_t2 = std::chrono::high_resolution_clock::now();
-  double init_time = std::chrono::duration_cast<std::chrono::nanoseconds>(init_t2 - initi_t1).count() / 1e6;
-  std::cout << "[Voxel map] Execution time: " << init_time << "[msec] " << std::endl;
-
-  int sum_time = 0;
-  // localization
-  for (const auto& src_points : src_points_set) {
-    std::cout << "-------------------------------" << std::endl;
-    std::cout << "[Localize] pcd file name: " << src_points.first << std::endl;
-    bbs3d_ptr->set_src_points(src_points.second);
-
-    auto localize_t1 = std::chrono::high_resolution_clock::now();
-    bbs3d_ptr->set_score_threshold_percentage(static_cast<float>(score_threshold_percentage));
-    bbs3d_ptr->localize();
-    auto localize_t2 = std::chrono::high_resolution_clock::now();
-    double localize_time = std::chrono::duration_cast<std::chrono::nanoseconds>(localize_t2 - localize_t1).count() / 1e6;
-    std::cout << "[Localize] Execution time: " << localize_time << "[msec] " << std::endl;
-    std::cout << "[Localize] Score: " << bbs3d_ptr->get_best_score() << std::endl;
-
-    if (!bbs3d_ptr->has_localized()) {
-      std::cout << "[Failed] Score is below the threshold." << std::endl;
-      continue;
+Eigen::Vector3f rpyRange2Eigen(const std::vector<float>& vec)
+{
+  Eigen::Vector3f e_vec;
+  for (int i = 0; i < 3; ++i)
+  {
+    if (vec[i] == 6.28)
+    {
+      e_vec(i) = 2 * M_PI;
     }
-
-    sum_time += localize_time;
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr src_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>());
-    eigen_to_pcl(src_points.second, src_cloud_ptr);
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr output_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>());
-    if (use_gicp) {
-      gicp_ptr->setInputSource(src_cloud_ptr);
-      gicp_ptr->align(*output_cloud_ptr, bbs3d_ptr->get_global_pose());
-    } else {
-      pcl::transformPointCloud(*src_cloud_ptr, *output_cloud_ptr, bbs3d_ptr->get_global_pose());
+    else
+    {
+      e_vec(i) = vec[i];
     }
-    pcl::io::savePCDFileBinary(pcd_save_folder_path + "/" + src_points.first + ".pcd", *output_cloud_ptr);
   }
-  std::cout << "[Localize] Average time: " << sum_time / src_points_set.size() << "[msec] per frame" << std::endl;
-  return 0;
+  return e_vec;
+};
+
+void pcl2Eigen(const pcl::PointCloud<pcl::PointXYZ>::Ptr& pcl_cloud, std::vector<Eigen::Vector3f>& points)
+{
+  points.resize(pcl_cloud->points.size());
+  std::transform(pcl_cloud->begin(), pcl_cloud->end(), points.begin(), [](const pcl::PointXYZ& p) { return Eigen::Vector3f(p.x, p.y, p.z); });
 }
 
-int main(int argc, char** argv) {
-  std::string config = argv[1];
-  BBS3DTest test;
-  return test.run(config);
+int main(int argc, char** argv)
+{
+  pcl::PointCloud<pcl::PointXYZ>::Ptr tar_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  if (pcl::io::loadPCDFile("../cloud/bbs_map.pcd", *tar_cloud) == -1)
+  {
+    std::cerr << "Failed to load target cloud" << std::endl;
+    exit(1);
+  }
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr src_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  if (pcl::io::loadPCDFile("../cloud/bbs_debug.pcd", *src_cloud) == -1)
+  {
+    std::cerr << "Failed to load source cloud" << std::endl;
+    exit(1);
+  }
+
+  std::unique_ptr<gpu::BBS3D> bbs3d_ptr = std::make_unique<gpu::BBS3D>();
+  std::vector<Eigen::Vector3f> tar_points;
+  pcl2Eigen(tar_cloud, tar_points);
+
+  bbs3d_ptr->set_tar_points(tar_points, 0.5, 6);
+  bbs3d_ptr->set_angular_search_range(rpyRange2Eigen(std::vector<float>({-0.02, -0.02, 0.0})), rpyRange2Eigen(std::vector<float>({0.02, 0.02, 6.28})));
+
+  Eigen::Vector3f input_pose(10.74, -0.995, 0.0);
+  auto trans_search_range = createTransSearchRange(input_pose, 20.0);
+  bbs3d_ptr->set_trans_search_range(trans_search_range);
+
+  std::vector<Eigen::Vector3f> src_points;
+  pcl2Eigen(src_cloud, src_points);
+
+  bbs3d_ptr->set_src_points(src_points);
+  bbs3d_ptr->set_score_threshold_percentage(0.5);
+
+  bbs3d_ptr->localize();
+
+  std::cout << "Score: " << bbs3d_ptr->get_best_score() << std::endl;
+
+  return 0;
 }
