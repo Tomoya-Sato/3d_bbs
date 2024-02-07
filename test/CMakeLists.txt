@@ -57,17 +57,7 @@ target_link_libraries(saver
 if(BUILD_CUDA)
   # gpu_test
   add_executable(gpu_test
-<<<<<<< Updated upstream
       src/gpu_test.cpp
-=======
-    src/gpu_bbs3d/gpu_test.cpp
-  )
-
-  target_include_directories(gpu_test
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
-    ${EIGEN3_INCLUDE_DIR}
-    ${gpu_bbs3d_INCLUDE_DIRS}
->>>>>>> Stashed changes
   )
 
   target_link_libraries(gpu_test
