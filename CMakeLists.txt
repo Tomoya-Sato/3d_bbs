@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(bbs3d)
 
 find_package(Eigen3 REQUIRED)
+find_package(PCL REQUIRED)
 
 find_package(OpenMP)
 if (OPENMP_FOUND)
@@ -33,6 +34,25 @@ add_library(cpu_bbs3d
 install(TARGETS cpu_bbs3d DESTINATION lib)
 
 if(BUILD_CUDA)
+  cuda_add_executable(bbs3d_test
+    bbs3d/src/gpu_bbs3d/bbs3d.cu
+    bbs3d/src/gpu_bbs3d/calc_score.cu
+    bbs3d/src/gpu_bbs3d/discreate_transformation.cu
+    bbs3d/src/gpu_bbs3d/voxelmaps.cu
+    bbs3d/src/gpu_bbs3d/stream_manager/check_error.cu
+    bbs3d/src/gpu_bbs3d/3dbbs_test.cpp
+  )
+  target_include_directories(bbs3d_test
+    PUBLIC
+    ${EIGEN3_INCLUDE_DIR}
+    ${PCL_INCLUDE_DIRS}
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/bbs3d/include>
+  )
+  target_link_libraries(bbs3d_test
+    ${CUDA_LIBRARIES}
+    ${PCL_LIBRARIES}
+  )
+
   cuda_add_library(gpu_bbs3d
     SHARED 
     bbs3d/src/gpu_bbs3d/bbs3d.cu

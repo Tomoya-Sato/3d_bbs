@@ -182,11 +182,13 @@ void BBS3D::localize() {
     }
 
     auto trans = trans_queue.top();
+    std::cout << "trans.score: " << trans.score << std::endl;
     trans_queue.pop();
 
     // Calculate remaining branch_stock when queue is empty
     if (trans_queue.empty() && !branch_stock.empty()) {
       const auto transset_output = calc_scores(branch_stock);
+      std::cout << "transset_output.size() : " << transset_output.size() << std::endl;
       for (const auto& output : transset_output) {
         if (output.score < best_score) continue;  // pruning
         trans_queue.push(output);
